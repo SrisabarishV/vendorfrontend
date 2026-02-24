@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import ServiceCard from '../Servicecard';
 import { Filter, X, Search, Calendar, Clock, FileText, Loader2 } from 'lucide-react';
-import api from '../../api/axios'; // Ensure this points to your configured axios instance
+import api from '../../api/axios'; 
+
+// Standard Time Slots
+const TIME_SLOTS = [
+  "09:00 AM - 10:00 AM",
+  "10:00 AM - 11:00 AM",
+  "11:00 AM - 12:00 PM",
+  "02:00 PM - 03:00 PM",
+  "03:00 PM - 04:00 PM",
+  "04:00 PM - 05:00 PM"
+];
 
 const BookingDashboard = () => {
   // Service Data State
@@ -15,8 +25,9 @@ const BookingDashboard = () => {
   const [pincode, setPincode] = useState('');
 
   // --- BOOKING STATE ---
-  const [selectedService, setSelectedService] = useState(null); // Stores the service being booked
+  const [selectedService, setSelectedService] = useState(null); 
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookedSlots, setBookedSlots] = useState([]); // Stores unavailable slots from backend
   const [bookingForm, setBookingForm] = useState({
     scheduledDate: '',
     scheduledTimeSlot: '',
@@ -65,6 +76,37 @@ const BookingDashboard = () => {
     fetchServices();
   }, []);
 
+  // --- NEW: Fetch Availability when Date Selected ---
+  useEffect(() => {
+    const fetchAvailability = async () => {
+      // Only fetch if we have a service and a date
+      if (selectedService && bookingForm.scheduledDate) {
+        try {
+          // Get Vendor ID from the selected service object
+          const vendorId = selectedService.vendorId || selectedService.vendor?.id; 
+
+          if (!vendorId) return;
+
+          const response = await api.get('/Booking/unavailable-slots', {
+            params: {
+              vendorId: vendorId,
+              date: bookingForm.scheduledDate
+            }
+          });
+          
+          setBookedSlots(response.data || []); // API returns array of strings: ["09:00 AM...", "10:00 AM..."]
+        } catch (error) {
+          console.error("Failed to fetch available slots", error);
+        }
+      } else {
+        setBookedSlots([]);
+      }
+    };
+
+    fetchAvailability();
+  }, [bookingForm.scheduledDate, selectedService]);
+
+
   // --- HANDLERS ---
 
   const handleApplyFilter = () => fetchServices(true);
@@ -73,7 +115,7 @@ const BookingDashboard = () => {
     setSelectedCategory('');
     setCity('');
     setPincode('');
-    fetchServices(false); // Reload all
+    fetchServices(false); 
   };
 
   // 1. Open Modal
@@ -82,9 +124,10 @@ const BookingDashboard = () => {
     // Reset form
     setBookingForm({
       scheduledDate: '',
-      scheduledTimeSlot: '09:00 AM - 10:00 AM', // Default or empty
+      scheduledTimeSlot: '', // Reset to empty so user must select
       userNotes: ''
     });
+    setBookedSlots([]); // Reset slots
   };
 
   // 2. Handle Input Change
@@ -108,14 +151,19 @@ const BookingDashboard = () => {
     };
 
     try {
-      // POST https://localhost:7000/api/Booking/bookings
       await api.post('/Booking/bookings', payload);
       
       alert("Booking confirmed successfully!");
-      setSelectedService(null); // Close modal
+      setSelectedService(null); 
     } catch (error) {
       console.error("Booking failed", error);
-      alert("Failed to book service. Please try again.");
+      
+      // Handle the error message sent from Backend (BadRequest)
+      if (error.response && error.response.data && error.response.data.Message) {
+          alert(error.response.data.Message); 
+      } else {
+          alert("Failed to book service. Please try again.");
+      }
     } finally {
       setBookingLoading(false);
     }
@@ -179,7 +227,6 @@ const BookingDashboard = () => {
               <ServiceCard 
                 key={service.serviceId} 
                 service={service} 
-                // Pass the specific service object to the handler
                 onBook={() => handleBookClick(service)} 
               />
             ))
@@ -213,21 +260,16 @@ const BookingDashboard = () => {
 
             {/* Service Summary */}
             <div className="p-5 bg-white border-b border-gray-100">
-                {/* Business Name */}
                 {selectedService.businessName && (
                   <div className="flex justify-between text-sm mb-2">
                       <span className="text-gray-500">Business:</span>
                       <span className="font-semibold text-gray-800">{selectedService.businessName}</span>
                   </div>
                 )}
-
-                {/* Vendor Name (Added as requested) */}
                 <div className="flex justify-between text-sm mb-2">
                     <span className="text-gray-500">Vendor Name:</span>
                     <span className="font-semibold text-gray-800">{selectedService.vendorName}</span>
                 </div>
-
-                {/* Price */}
                 <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Price:</span>
                     <span className="font-bold text-emerald-600">₹{selectedService.basePrice} / {selectedService.priceUnit}</span>
@@ -264,13 +306,25 @@ const BookingDashboard = () => {
                   onChange={handleBookingChange}
                   className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all bg-white"
                 >
-                    <option value="09:00 AM - 10:00 AM">09:00 AM - 10:00 AM</option>
-                    <option value="10:00 AM - 11:00 AM">10:00 AM - 11:00 AM</option>
-                    <option value="11:00 AM - 12:00 PM">11:00 AM - 12:00 PM</option>
-                    <option value="02:00 PM - 03:00 PM">02:00 PM - 03:00 PM</option>
-                    <option value="03:00 PM - 04:00 PM">03:00 PM - 04:00 PM</option>
-                    <option value="04:00 PM - 05:00 PM">04:00 PM - 05:00 PM</option>
+                  <option value="">Select a time slot</option>
+                  
+                  {TIME_SLOTS.map((slot) => {
+                    // Logic to hide booked slots
+                    if (bookedSlots.includes(slot)) {
+                      return null; // Don't render if booked
+                    }
+                    return (
+                      <option key={slot} value={slot}>{slot}</option>
+                    );
+                  })}
                 </select>
+                {!bookingForm.scheduledDate && (
+                  <p className="text-xs text-gray-400 mt-1">Select a date first to check availability.</p>
+                )}
+                {/* Show message if all slots are booked */}
+                {bookingForm.scheduledDate && bookedSlots.length === TIME_SLOTS.length && (
+                   <p className="text-xs text-red-500 mt-1">All slots are booked for this date.</p>
+                )}
               </div>
 
               {/* Notes */}
